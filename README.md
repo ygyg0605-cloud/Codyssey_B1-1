@@ -347,6 +347,13 @@ sudo ls -l /home/agent-admin/agent-app/bin/monitor.sh
 - monitor.log가 10MB 이상이면 최대 10개 파일로 로그 회전
 ```
 
+monitor.sh 실행 권한 설정
+
+```text
+sudo chown agent-dev:agent-core /home/agent-admin/agent-app/bin/monitor.sh
+sudo chmod 750 /home/agent-admin/agent-app/bin/monitor.sh
+```
+
 ### monitor.sh 소스코드
 
 ```bash
