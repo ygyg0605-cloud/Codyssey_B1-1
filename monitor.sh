@@ -1,9 +1,6 @@
-좋아. GitHub에 monitor.sh 파일로 올릴 수 있게, 아래 코드만 그대로 복붙하면 돼.
+monitor.sh는 agent-app 프로세스와 15034 포트 상태를 확인하고, CPU/메모리/디스크 사용률을 수집하여 /var/log/agent-app/monitor.log에 기록하는 Bash 모니터링 스크립트입니다.
 
-파일 이름은:
 
-monitor.sh
-내용은 아래처럼 넣으면 돼.
 
 #!/bin/bash
 
