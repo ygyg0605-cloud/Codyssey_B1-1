@@ -25,6 +25,16 @@ sudo -v
 
 SSH 접속 포트를 `20022`로 변경하고, root 계정의 원격 SSH 접속을 차단하였다.
 
+방화벽 설정 코드
+
+```text
+sudo ufw default deny incoming # 인바운드를 막음(외부에서 내 서버로 접속)
+sudo ufw default allow outgoing # 아웃바운드를 허용(내 서버에서 외부로 접속)
+sudo ufw allow 20022/tcp or 15034/tcp # 20022 포트, 10534 포트 허용
+suo ufw enable # ufw 활성화
+sudo ufw status # 상태 확인
+```
+
 설정 파일:
 
 ```text
