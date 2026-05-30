@@ -25,15 +25,6 @@ sudo -v
 
 SSH 접속 포트를 `20022`로 변경하고, root 계정의 원격 SSH 접속을 차단하였다.
 
-방화벽 설정 코드
-
-```text
-sudo ufw default deny incoming # 인바운드를 막음(외부에서 내 서버로 접속)
-sudo ufw default allow outgoing # 아웃바운드를 허용(내 서버에서 외부로 접속)
-sudo ufw allow 20022/tcp or 15034/tcp # 20022 포트, 10534 포트 허용
-suo ufw enable # ufw 활성화
-sudo ufw status # 상태 확인
-```
 
 설정 파일:
 
@@ -73,6 +64,16 @@ SSH 기본 포트인 22번은 자동 공격 대상이 되기 쉽기 때문에 �
 
 UFW를 사용하여 방화벽을 활성화하고, 인바운드 허용 포트를 `20022/tcp`, `15034/tcp`로 제한하였다.
 
+방화벽 설정 코드
+
+```text
+sudo ufw default deny incoming # 인바운드를 막음(외부에서 내 서버로 접속)
+sudo ufw default allow outgoing # 아웃바운드를 허용(내 서버에서 외부로 접속)
+sudo ufw allow 20022/tcp or 15034/tcp # 20022 포트, 10534 포트 허용
+suo ufw enable # ufw 활성화
+sudo ufw status # 상태 확인
+```
+
 확인 명령어:
 
 ```bash
@@ -99,6 +100,17 @@ To                         Action      From
 ---
 
 ## 4. 계정 및 그룹 생성
+
+실행 방법
+
+```text
+sudo groupadd agent-common & agent-core # 그룹 생성
+getent group agent-common & agent-core # 그룹 생성 확인
+sudo useradd -m -s /bin/bash agent-admin & agent-dev & agent-test # 사용자 생성 (-m: 홈 디렉토리를 생성, -s /bin/bash: 로그인 시 사용할 쉘을 Bash로 지정)
+sudo usermod -aG agent-common,agent-core agent-admin # 사용자를 그룹에 추가
+id agent-admin # 사용자 확인
+```
+
 
 ### 생성 계정
 
