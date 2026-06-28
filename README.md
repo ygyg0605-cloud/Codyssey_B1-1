@@ -32,6 +32,16 @@ SSH 접속 포트를 `20022`로 변경하고, root 계정의 원격 SSH 접속�
 /etc/ssh/sshd_config
 ```
 
+변경 방법:
+
+```
+sudo nano /etc/ssh/sshd_config  #sudo nano로 sshd_config 파일 접속
+Port 22 -> Port 20022
+PermitRootLogin prohibit-password -> PermitRootLogin no로 수정
+sudo sshd -t
+sudo systemctl restart ssh   #수정사항 반영
+```
+
 확인 명령어:
 
 ```bash
@@ -483,7 +493,45 @@ sudo tail -n 5 /var/log/agent-app/monitor.log
 [2026-05-28 23:38:01] PID:2454 CPU:0.0% MEM:7.1% DISK_USED:1%
 ```
 
+## monitor.sh에서 pgrep, ss를 선택한 이유
+pgrep - 전체 프로세스 정보를 자세히 보여주는 ps|grep 방식보다 조건에 맞는 프로세스 ID만 찾는 pgrep이 스크립트에서 사용하기 적합하기 때문.
+pgrep으로 하면 한 줄에 끝내는데, ps|grep은 전체 목록을 꺼낸 후, 또 특정 프로세스 ID를 입력해야 함.
+
+ss - 현재 열려 있는 포트와 LISTEN 상태를 확인하기 위해 사용. netstart보다 최신 리눅스 환경에서 기본적으로 권장됨.
+
 ---
+
+## 로그 용량 관리(10MB/10개) 기능 설명
+
+```
+#monitor.sh
+
+Max_SIZE=$((10*1024*1024*)) #1024*1024는 1MB를 byte 단위로 표현한 것. 즉 10MB.
+Max_FILES=10 #보관할 로그 파일의 최대 개수 10개
+
+#로그 용량 관리 함수
+if [ -f "$LOG_FILE" ]; then #monitor.log 파일의 존재 확인
+size=$(stat -c%s "$LOG_FILE") # 현재 로그 파일의 크기를 바이트 단위로 화긴
+if [ "$size" -ge "$MAX_SIZE" ]; then # 현재 로그 파일 크기가 10MB 이상인지 비교
+
+ i=$MAX_FILES
+      while [ "$i" -ge 1 ]; do
+        if [ -f "$LOG_FILE.$i" ]; then
+          if [ "$i" -eq "$MAX_FILES" ]; then
+            rm -f "$LOG_FILE.$i" # monitor.log.10이 존재하면 삭제(가장 오래된 로그이기 때문)
+          else
+            mv "$LOG_FILE.$i" "$LOG_FILE.$((i + 1))" # 현재 로그 파일을 monitor.log.1로 이동
+          fi
+        fi
+        i=$((i - 1))
+      done
+      mv "$LOG_FILE" "$LOG_FILE.1"
+    fi
+  fi
+}
+# 로그 파일이 10MB 이상이면 기존 백업 로그를 뒤로 한 칸 씩 이동시킴.
+
+```
 
 ## 10. cron 자동 실행 등록
 
