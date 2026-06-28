@@ -211,6 +211,47 @@ api_keys:
 - agent-admin, agent-dev만 읽기/쓰기 가능
 ```
 
+## 권한 정책 설명
+
+이번 과제에서는 공유 디렉토리와 보안 디렉토리를 분리하기 위해 그룹 권한을 사용하였다.
+
+계정과 그룹 구성은 다음과 같다.
+
+```bash
+agent-common: agent-admin, agent-dev, agent-test
+agent-core: agent-admin, agent-dev
+```
+
+`upload_files`는 세 계정이 모두 사용하는 공유 디렉토리이므로 그룹을 `agent-common`으로 설정하였다.
+
+```bash
+sudo chown agent-admin:agent-common /home/agent-admin/agent-app/upload_files
+sudo chmod 2770 /home/agent-admin/agent-app/upload_files
+```
+
+`api_keys`와 `/var/log/agent-app`은 API 키와 운영 로그가 저장되는 민감한 디렉토리이므로 `agent-core` 그룹만 접근하도록 설정하였다.
+
+```bash
+sudo chown agent-admin:agent-core /home/agent-admin/agent-app/api_keys
+sudo chmod 2770 /home/agent-admin/agent-app/api_keys
+
+sudo chown agent-admin:agent-core /var/log/agent-app
+sudo chmod 2770 /var/log/agent-app
+```
+
+`2770`은 소유자와 그룹에게 읽기/쓰기/진입 권한을 주고, 기타 사용자는 차단한다. 앞의 `2`는 `setgid`로, 디렉토리 안에 새 파일이 생성될 때 부모 디렉토리의 그룹을 따라가게 한다.
+
+`monitor.sh`는 과제 요구사항에 따라 소유자를 `agent-dev`, 그룹을 `agent-core`, 권한을 `750`으로 설정하였다.
+
+```bash
+sudo chown agent-dev:agent-core /home/agent-admin/agent-app/bin/monitor.sh
+sudo chmod 750 /home/agent-admin/agent-app/bin/monitor.sh
+```
+
+`750`은 소유자에게 읽기/쓰기/실행 권한, 그룹에게 읽기/실행 권한을 주고, 기타 사용자는 차단한다. 따라서 `agent-dev`는 스크립트를 수정할 수 있고, `agent-admin`은 `agent-core` 그룹에 포함되어 cron으로 실행할 수 있다.
+
+검증 결과 `agent-test`는 `upload_files`에는 파일을 생성할 수 있었지만, `api_keys`에는 접근할 수 없었다. 이를 통해 공유 디렉토리는 `agent-common`에게 열고, 보안 디렉토리는 `agent-core`로 제한하는 권한 정책을 만족
+
 ---
 
 ## 6. 환경 변수 설정
@@ -533,6 +574,137 @@ if [ "$size" -ge "$MAX_SIZE" ]; then # 현재 로그 파일 크기가 10MB 이�
 
 ```
 
+## awk 파싱 방식과 로그 포맷 고정 이유
+
+`monitor.sh`에서는 CPU, 메모리, 디스크 사용률을 수집하기 위해 `top`, `free`, `df` 명령어를 사용하였다. 이 명령어들은 사람이 읽기 좋은 형태로 여러 줄과 여러 열을 출력하므로, 스크립트에서는 필요한 숫자만 추출하기 위해 `awk`를 사용하였다.
+
+`awk`는 텍스트를 줄 단위와 열 단위로 나누어 처리할 수 있는 도구이다. 특정 줄을 찾고, 원하는 열만 꺼내거나 계산할 때 적합하다.
+
+### CPU 사용률 추출
+
+```bash
+CPU=$(top -bn1 | awk -F',' '/Cpu\(s\)/ {print 100 - $4}' | awk '{printf "%.1f", $1}')
+```
+
+`top -bn1`은 CPU 상태를 한 번만 출력한다.
+
+- `-b`: batch 모드로 실행하여 스크립트에서 처리하기 쉽게 출력
+- `-n1`: 한 번만 실행하고 종료
+
+`top` 출력에는 다음과 같은 줄이 포함된다.
+
+```text
+%Cpu(s):  3.0 us,  1.0 sy,  0.0 ni, 96.0 id,  0.0 wa, ...
+```
+
+여기서 `id`는 idle의 의미로, CPU가 쉬고 있는 비율이다. CPU 사용률은 전체 100%에서 idle 비율을 뺀 값으로 계산한다.
+
+```text
+CPU 사용률 = 100 - idle 비율
+```
+
+`awk -F','`는 쉼표를 기준으로 열을 나누고, `/Cpu\(s\)/`는 `Cpu(s)`가 포함된 줄만 찾는다. 이후 `{print 100 - $4}`로 idle 값을 이용해 CPU 사용률을 계산한다.
+
+마지막 `awk '{printf "%.1f", $1}'`는 결과를 소수점 한 자리로 고정한다.
+
+### 메모리 사용률 추출
+
+```bash
+MEM=$(free | awk '/Mem:/ {printf "%.1f", ($3/$2)*100}')
+```
+
+`free` 명령어는 메모리 상태를 보여준다.
+
+```text
+               total        used        free      shared  buff/cache   available
+Mem:         8000000      1200000     3000000      ...
+```
+
+`Mem:` 줄에서 `$2`는 전체 메모리, `$3`는 사용 중인 메모리이다. 따라서 메모리 사용률은 다음과 같이 계산한다.
+
+```text
+메모리 사용률 = 사용 중인 메모리 / 전체 메모리 * 100
+```
+
+`awk '/Mem:/ ...'`는 `Mem:`이 포함된 줄만 찾고, `($3/$2)*100`으로 사용률을 계산한다. `printf "%.1f"`를 사용하여 소수점 한 자리로 출력한다.
+
+### 디스크 사용률 추출
+
+```bash
+DISK_USED=$(df / | awk 'NR==2 {gsub("%","",$5); print $5}')
+```
+
+`df /`는 루트 파티션 `/`의 디스크 사용량을 보여준다.
+
+```text
+Filesystem     1K-blocks    Used Available Use% Mounted on
+/dev/sda1       50000000 1000000  49000000   2% /
+```
+
+두 번째 줄의 다섯 번째 열 `$5`가 디스크 사용률이다.
+
+```text
+Use% = 2%
+```
+
+스크립트에서는 숫자 비교를 해야 하므로 `%` 기호를 제거한다.
+
+```bash
+gsub("%","",$5)
+```
+
+즉 `2%`를 `2`로 바꾼다.
+
+- `NR==2`: 두 번째 줄만 처리
+- `gsub("%","",$5)`: `%` 기호 제거
+- `print $5`: 숫자만 출력
+
+### 로그 포맷 고정 이유
+
+스크립트는 로그를 다음 형식으로 기록한다.
+
+```text
+[YYYY-MM-DD HH:MM:SS] PID:... CPU:..% MEM:..% DISK_USED:..%
+```
+
+예시:
+
+```text
+[2026-05-28 23:38:01] PID:2454 CPU:0.0% MEM:7.1% DISK_USED:1%
+```
+
+로그 포맷을 고정한 이유는 운영 중 문제가 발생했을 때 시간순으로 상태를 추적하기 위해서이다. 로그 형식이 매번 달라지면 나중에 `grep`, `awk`, `tail` 같은 명령어로 분석하기 어렵다.
+
+고정된 로그 포맷의 장점은 다음과 같다.
+
+- 장애 발생 시점을 시간 기준으로 추적하기 쉽다.
+- PID를 통해 어떤 프로세스를 감시했는지 확인할 수 있다.
+- CPU, 메모리, 디스크 사용률을 일정한 이름으로 확인할 수 있다.
+- `grep`, `awk` 같은 도구로 필요한 값만 다시 추출하기 쉽다.
+- cron으로 반복 실행될 때도 로그 구조가 일정하게 유지된다.
+
+모니터링 로그는 장애 분석과 추세 확인에 사용되는 운영 데이터이므로, 사람이 읽기 쉽고 명령어로 재분석하기 쉬운 고정 포맷으로 남기는 것이 중요하다.
+
+## 경고 항목을 분리한 이유
+
+`monitor.sh`에서는 오류와 경고를 구분하였다.
+
+```bash
+오류: agent-app 프로세스 없음, TCP 15034 포트 미열림
+경고: 방화벽 비활성화, CPU/MEM/DISK 임계치 초과
+```
+
+프로세스가 없거나 포트가 열려 있지 않으면 앱이 정상 서비스 중이라고 보기 어렵기 때문에 `[ERROR]`를 출력하고 종료한다.
+
+```bash
+echo "[ERROR] Process is not running"
+exit 1
+```
+
+반면 방화벽 비활성화나 자원 사용률 초과는 위험 신호이지만 앱이 즉시 중단된 상태는 아니다. CPU나 메모리는 일시적으로 높아질 수 있으므로, 이때마다 스크립트를 종료하면 이후 상태 기록이 끊긴다.
+
+그래서 경고 항목은 `[WARNING]`만 출력하고 스크립트는 계속 실행하여 로그를 남기도록 하였다. 이렇게 하면 운영자가 경고 발생 이후의 CPU, 메모리, 디스크 변화까지 계속 추적할 수 있다.
+
 ## 10. cron 자동 실행 등록
 
 ### 수행 내용
@@ -596,3 +768,128 @@ sudo crontab -u agent-admin -l
 - [x] monitor.log 누적 기록 확인
 - [x] agent-admin crontab 매분 실행 등록
 - [x] 1분 후 monitor.log 자동 증가 확인
+
+## 12. 기타 질답
+
+# 리다이렉션 '>'와 '>>'의 차이
+: '>'는 기존 파일 내용을 지우고 새로 저장. '>>'는 기존 파일 내용을 유지하고 파일 끝에 새 내용을 추가
+: 모니토링 로그는 시간 순서대로 계속 쌓여야하기 때문에 '>>'를 사용함.
+
+# 모니터링 대상이 웹 서버로 바뀔 경우 수정할 부분
+현재 `monitor.sh`는 `agent-app`을 기준으로 작성되었다. 만약 모니터링 대상이 Nginx 같은 웹 서버로 바뀐다면 다음 항목을 수정해야 한다.
+
+```bash
+프로세스 이름
+포트 번호
+로그 경로
+임계값 기준
+```
+
+예를 들어 Nginx는 프로세스 이름이 `nginx`이므로 프로세스 확인 부분을 바꿔야 한다.
+
+```bash
+APP_NAME="nginx"
+pgrep -x nginx
+```
+
+포트도 앱 포트인 `15034`가 아니라 웹 서버 포트로 바꿔야 한다.
+
+```bash
+PORT=80
+PORT=443
+```
+
+HTTP는 보통 `80`, HTTPS는 보통 `443` 포트를 사용한다.
+
+로그 경로도 Nginx 기준으로 바뀐다.
+
+```bash
+/var/log/nginx/access.log
+/var/log/nginx/error.log
+```
+
+또한 웹 서버는 접속량에 따라 CPU와 메모리 사용량이 달라질 수 있으므로 임계값도 서비스 특성에 맞게 조정해야 한다.
+
+```bash
+CPU > 20%
+MEM > 10%
+DISK_USED > 80%
+```
+
+즉, 모니터링 대상이 바뀌면 이름, 프로세스 확인 방식, 포트 번호, 로그 위치, 자원 임계값을 함께 수정
+
+# 프로세스는 살아있지만 포트가 열리지 않는 경우
+
+가능한 원인은 다음과 같다.
+
+```bash
+앱 초기화 오류
+AGENT_PORT 환경 변수 설정 오류
+다른 프로세스가 같은 포트 사용 중
+앱이 0.0.0.0이 아니라 127.0.0.1에만 바인딩됨
+키 파일 또는 로그 디렉토리 권한 문제
+방화벽 또는 네트워크 설정 문제
+```
+
+확인 순서는 다음과 같다.
+
+먼저 프로세스가 실제로 살아있는지 확인한다.
+
+```bash
+ps -ef | grep agent-app
+```
+
+그다음 포트가 LISTEN 상태인지 확인한다.
+
+```bash
+sudo ss -tulnp | grep 15034
+```
+
+포트가 보이지 않으면 환경 변수가 올바른지 확인한다.
+
+```bash
+echo $AGENT_PORT
+echo $AGENT_HOME
+echo $AGENT_KEY_PATH
+echo $AGENT_LOG_DIR
+```
+
+같은 포트를 다른 프로세스가 사용 중인지도 확인한다.
+
+```bash
+sudo ss -tulnp | grep 15034
+```
+
+마지막으로 키 파일과 로그 디렉토리 권한을 확인한다.
+
+```bash
+ls -l /home/agent-admin/agent-app/api_keys/t_secret.key
+ls -ld /var/log/agent-app
+```
+
+# 로그 급증으로 디스크가 가득 찰 위험이 있을 때 대응
+단기 대응은 먼저 디스크 사용량과 큰 로그 파일을 확인하는 것이다.
+
+```bash
+df -h
+du -sh /var/log/agent-app/*
+```
+
+불필요한 오래된 로그는 삭제하고, 보관이 필요한 로그는 압축한다.
+
+```bash
+sudo rm /var/log/agent-app/monitor.log.10
+gzip /var/log/agent-app/monitor.log.1
+```
+
+단, 현재 실행 중인 프로세스가 쓰는 로그 파일을 무작정 삭제하면 공간이 바로 반환되지 않을 수 있으므로 주의해야 한다.
+
+중기 대응은 로그가 계속 쌓여도 디스크를 가득 채우지 않도록 로그 관리 정책을 적용하는 것이다.
+
+```bash
+로그 파일 최대 크기 제한
+보관 파일 개수 제한
+오래된 로그 압축
+일정 기간 지난 로그 삭제
+logrotate 같은 도구 사용
+```
